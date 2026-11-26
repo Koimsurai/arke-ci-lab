@@ -9501,3 +9501,30 @@ fn the_recycle_bin_tab_keeps_nothing_of_a_removed_drive(cx: &mut TestAppContext)
         assert!(!v.history.can_go_forward());
     });
 }
+
+/// Windows 10 draws no top border under our title bar, so Arke paints a 1 px line there (#420);
+/// elsewhere there is no such element.
+#[gpui::test]
+fn win10_top_border_line_only_where_set(cx: &mut TestAppContext) {
+    let fs = FakeFs::new();
+    fs.insert_dir(r"C:\w", Vec::new());
+    let (ws, cx) = setup_workspace(cx, fs, r"C:\w");
+    cx.simulate_resize(gpui::size(px(900.), px(600.)));
+
+    // Not Windows 10: no line, whatever the colour logic says.
+    ws.update(cx, |ws, _| ws.set_top_border_for_test(None));
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("win10-top-border").is_none(), "no line");
+
+    // Windows 10: a line along the top edge, one physical pixel high.
+    ws.update(cx, |ws, cx| {
+        ws.set_top_border_for_test(Some(0x12_34_56));
+        cx.notify();
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let line = cx.debug_bounds("win10-top-border").expect("line drawn");
+    assert_eq!(line.origin.y, px(0.));
+    assert_eq!(line.size.width, px(900.));
+}
