@@ -1,0 +1,25 @@
+# #420 lab: Windows Server 2022 (build 20348) has Windows 10's DWM, so a window that draws its own
+# title bar loses the 1 px top border there. Builds Arke, starts it with a test profile and takes
+# screenshots of the window, active and inactive, with its surroundings.
+name: win10-border
+on:
+  push:
+    branches: [lab/unfixed, lab/fixed]
+  workflow_dispatch:
+jobs:
+  shots:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (dev)
+        run: cargo build -p arke-app
+      - name: Screenshots
+        shell: powershell
+        run: ./lab/shots.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-${{ github.sha }}
+          path: shots
