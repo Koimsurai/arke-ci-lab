@@ -17,6 +17,33 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool p);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out R r, int s);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+  delegate bool Each(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(Each f, IntPtr l);
+  static string Class(IntPtr h) { var s = new System.Text.StringBuilder(256); GetClassName(h, s, 256); return s.ToString(); }
+  // Minimizes every console window (the runner's agent, a debug build's own console).
+  public static int HideConsoles() {
+    int n = 0;
+    EnumWindows((h, l) => { if (IsWindowVisible(h) && Class(h) == "ConsoleWindowClass") { ShowWindow(h, 6); n++; } return true; }, IntPtr.Zero);
+    return n;
+  }
+  // The largest visible top-level window of process `pid` that is not a console.
+  public static IntPtr WindowOf(uint pid) {
+    IntPtr best = IntPtr.Zero; long area = 0;
+    EnumWindows((h, l) => {
+      uint p; GetWindowThreadProcessId(h, out p);
+      if (p == pid && IsWindowVisible(h) && Class(h) != "ConsoleWindowClass") {
+        R r; GetWindowRect(h, out r); long a = (long)(r.r - r.l) * (r.b - r.t);
+        if (a > area) { area = a; best = h; }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return best;
+  }
+  public static string ClassOf(IntPtr h) { return Class(h); }
 }
 '@
 [W]::SetProcessDPIAware() | Out-Null
@@ -32,9 +59,11 @@ $env:ARKE_NO_FOLDER_HANDLER = '1'; $env:ARKE_UNINSTALL_SANDBOX = '1'; $env:USERN
 $exe = Join-Path $PWD 'target\debug\arke.exe'
 $proc = Start-Process $exe 'C:\Windows' -PassThru
 $h = [IntPtr]::Zero
-for ($i = 0; $i -lt 120 -and $h -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 500; $proc.Refresh(); $h = $proc.MainWindowHandle }
+for ($i = 0; $i -lt 120 -and $h -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 500; $h = [W]::WindowOf([uint32]$proc.Id) }
 if ($h -eq [IntPtr]::Zero) { Log 'no Arke window'; exit 1 }
 Start-Sleep 6
+Log ("consoles minimized: " + [W]::HideConsoles() + "; Arke window class " + [W]::ClassOf($h))
+Start-Sleep 1
 
 function Frame { $r = New-Object W+R; [W]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null; $r }
 function Shot($name) {
