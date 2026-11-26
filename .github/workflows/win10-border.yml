@@ -1,3 +1,4 @@
+# lab run
 # #420 lab: Windows Server 2022 (build 20348) has Windows 10's DWM, so a window that draws its own
 # title bar loses the 1 px top border there. Builds Arke, starts it with a test profile and takes
 # screenshots of the window, active and inactive, with its surroundings.
