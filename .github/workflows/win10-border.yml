@@ -18,7 +18,7 @@ jobs:
         run: cargo build -p arke-app
       - name: Screenshots
         shell: powershell
-        run: ./tools/window-shots.ps1 -Theme dark
+        run: ./lab/matrix.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

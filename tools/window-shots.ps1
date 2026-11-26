@@ -2,13 +2,27 @@
 # window with 24 px around it: active, then inactive (Notepad in front, out of the way), plus the
 # whole screen. Logs the pixel colours across the four edges, outside to inside, so the top edge
 # can be compared with the border DWM draws on the other three. Used by window-shots.yml.
-param([ValidateSet('light', 'dark')] [string] $Theme = 'light')
+param([ValidateSet('light', 'dark')] [string] $Theme = 'light',
+  [ValidateSet('default', 'white')] [string] $Background = 'default', [string] $Out = 'shots')
 $ErrorActionPreference = 'Stop'
-$out = Join-Path $PWD 'shots'
+$out = Join-Path $PWD $Out
 New-Item -ItemType Directory -Force $out | Out-Null
 function Log($m) { Write-Host $m; Add-Content "$out\log.txt" $m }
 $build = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuild
-Log "OS build $build, theme $Theme"
+Log "OS build $build, theme $Theme, background $Background"
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class Desk {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool SystemParametersInfo(uint a, uint b, string c, uint d);
+  [DllImport("user32.dll")] static extern bool SetSysColors(int n, int[] e, int[] c);
+  // A plain white desktop (no wallpaper image), or the wallpaper image `path` back.
+  public static void White() { SystemParametersInfo(0x14, 0, "", 0); SetSysColors(1, new[] { 1 }, new[] { 0xFFFFFF }); }
+  public static void Image(string path) { SystemParametersInfo(0x14, 0, path, 0); }
+}
+'@
+$wallpaper = (Get-ItemProperty 'HKCU:\Control Panel\Desktop').WallPaper
+if ($Background -eq 'white') { [Desk]::White() } else { [Desk]::Image($wallpaper) }
+Start-Sleep 1
 
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
