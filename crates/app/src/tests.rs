@@ -9509,7 +9509,7 @@ fn win10_top_border_line_only_where_set(cx: &mut TestAppContext) {
     let fs = FakeFs::new();
     fs.insert_dir(r"C:\w", Vec::new());
     let (ws, cx) = setup_workspace(cx, fs, r"C:\w");
-    cx.simulate_resize(gpui::size(px(900.), px(600.)));
+    cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(600.)));
 
     // Not Windows 10: no line, whatever the colour logic says.
     ws.update(cx, |ws, _| ws.set_top_border_for_test(None));
@@ -9525,6 +9525,6 @@ fn win10_top_border_line_only_where_set(cx: &mut TestAppContext) {
     cx.update(|window, _| window.refresh());
     cx.run_until_parked();
     let line = cx.debug_bounds("win10-top-border").expect("line drawn");
-    assert_eq!(line.origin.y, px(0.));
-    assert_eq!(line.size.width, px(900.));
+    assert_eq!(line.origin.y, gpui::px(0.));
+    assert_eq!(line.size.width, gpui::px(900.));
 }
