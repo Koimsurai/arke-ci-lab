@@ -461,15 +461,59 @@ pub(crate) fn windows_version() -> Option<(u32, u32, u32)> {
 
 /// Windows 11 (build 22000+), which Mica needs. RtlGetVersion ignores the compatibility manifest.
 pub(crate) fn supports_mica() -> bool {
-    use windows::Wdk::System::SystemServices::RtlGetVersion;
-    use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
-    let mut info = OSVERSIONINFOW {
-        dwOSVersionInfoSize: u32::try_from(size_of::<OSVERSIONINFOW>()).unwrap_or(0),
-        ..Default::default()
-    };
-    // SAFETY: info has its size set and is a valid out pointer.
-    let status = unsafe { RtlGetVersion(&raw mut info) };
-    status.is_ok() && info.dwMajorVersion >= 10 && info.dwBuildNumber >= 22000
+    windows_version().is_some_and(|(major, _, build)| is_windows_11(major, build))
+}
+
+fn is_windows_11(major: u32, build: u32) -> bool {
+    major >= 10 && build >= 22000
+}
+
+/// Windows 10 (before build 22000): its DWM draws the 1 px window border in the non-client
+/// area, which our own title bar covers at the top (#420). Windows 11 draws its own border.
+pub(crate) fn is_windows_10() -> bool {
+    windows_version().is_some_and(|(major, _, build)| major == 10 && !is_windows_11(major, build))
+}
+
+/// Whether the 1 px top line is drawn: only on Windows 10, and not when the window has no frame
+/// to match (maximized, full screen).
+pub(crate) fn top_border_visible(is_windows_10: bool, maximized: bool, fullscreen: bool) -> bool {
+    is_windows_10 && !maximized && !fullscreen
+}
+
+// The Windows 10 border colours when the accent colour is not used on borders, and the border of
+// an inactive window. Microsoft does not document them. Windows Terminal paints its own top line
+// black (NonClientIslandWindow::_OnPaint, microsoft/terminal); these are dark and mid greys
+// chosen to sit next to the DWM border, and are unverified: check against a real Windows 10.
+const BORDER_ACTIVE: u32 = 0x26_26_26;
+const BORDER_INACTIVE: u32 = 0x5A_5A_5A;
+
+/// Colour (0xRRGGBB) of the top line, from "Show accent color on title bars and window borders"
+/// (`ColorPrevalence`), the DWM colorization colour (`DwmGetColorizationColor`, 0xAARRGGBB) and
+/// whether the window is active. With the accent on borders, an active window's border is the
+/// colorization colour (opaque); otherwise, and for any inactive window, a fixed grey.
+pub(crate) fn top_border_rgb(accent_on_borders: bool, colorization: u32, active: bool) -> u32 {
+    match (accent_on_borders, active) {
+        (true, true) => colorization & 0x00FF_FFFF,
+        (_, true) => BORDER_ACTIVE,
+        (_, false) => BORDER_INACTIVE,
+    }
+}
+
+/// [`top_border_rgb`] with the settings read from the system (read-only). Only called when the
+/// window is created and when its activation, appearance or settings change, never per frame.
+pub(crate) fn top_border_color(active: bool) -> u32 {
+    use windows::Win32::Graphics::Dwm::DwmGetColorizationColor;
+    use windows::Win32::System::Registry::HKEY_CURRENT_USER;
+    let accent = read_reg_dword(
+        HKEY_CURRENT_USER,
+        r"Software\Microsoft\Windows\DWM",
+        "ColorPrevalence",
+    ) == Some(1);
+    let mut color = 0u32;
+    let mut opaque = windows::core::BOOL::default();
+    // SAFETY: both out pointers are valid for the call.
+    let ok = unsafe { DwmGetColorizationColor(&raw mut color, &raw mut opaque) }.is_ok();
+    top_border_rgb(accent && ok, color, active)
 }
 
 /// UI language: `ARKE_LANG` wins, otherwise the user locale. Traditional Chinese locales
@@ -1997,6 +2041,29 @@ fn format_drive_result(code: u32) -> Result<(), ShellError> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn top_line_only_on_windows_10_in_a_normal_window() {
+        assert!(top_border_visible(true, false, false));
+        assert!(!top_border_visible(true, true, false));
+        assert!(!top_border_visible(true, false, true));
+        assert!(!top_border_visible(false, false, false));
+    }
+
+    #[test]
+    fn windows_builds_are_told_apart() {
+        assert!(is_windows_11(10, 22000));
+        assert!(!is_windows_11(10, 19045));
+    }
+
+    #[test]
+    fn top_line_colour_follows_accent_and_activation() {
+        let accent = 0xC4_12_34_56;
+        assert_eq!(top_border_rgb(true, accent, true), 0x12_34_56);
+        assert_eq!(top_border_rgb(false, accent, true), BORDER_ACTIVE);
+        assert_eq!(top_border_rgb(true, accent, false), BORDER_INACTIVE);
+        assert_eq!(top_border_rgb(false, accent, false), BORDER_INACTIVE);
+    }
 
     #[test]
     fn format_drive_codes_map_to_errors() {

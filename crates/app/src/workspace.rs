@@ -475,6 +475,9 @@ pub(crate) struct Workspace {
     bounds_task: Option<gpui::Task<()>>,
     /// Look version this window last rendered ([`theme::look`]).
     look_seen: u32,
+    /// Windows 10 only (None elsewhere): colour (0xRRGGBB) of the 1 px line along the top edge,
+    /// where DWM's own border is under our title bar (#420).
+    top_border: Option<u32>,
     /// How this window's start is timed; handed to the pane its first frame shows.
     start_clock: StartClock,
 }
@@ -776,6 +779,7 @@ impl Workspace {
         });
         // On window activation, recheck visible network folders once. No polling; watchers cover the rest.
         let activation = cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+            this.sync_top_border(window, cx);
             if !window.is_window_active() {
                 return;
             }
@@ -886,6 +890,7 @@ impl Workspace {
             _bounds: bounds,
             bounds_task: None,
             look_seen: theme::look(),
+            top_border: crate::win::is_windows_10().then(|| crate::win::top_border_color(true)),
             start_clock: StartClock::for_window(started_at),
         };
         let pane = this.make_pane(start_path, bench, started_at, window, cx);
@@ -911,11 +916,51 @@ impl Workspace {
     /// window last drew. The look is app-wide, so another window may have applied it first.
     fn sync_look(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         apply_theme(window, cx);
+        self.sync_top_border(window, cx);
         let look = theme::look();
         if look != self.look_seen {
             self.look_seen = look;
             window.refresh();
         }
+    }
+
+    /// Windows 10: reads the border colour again (activation, system colours or settings
+    /// changed). Nothing to do elsewhere.
+    fn sync_top_border(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.top_border.is_none() {
+            return;
+        }
+        let color = crate::win::top_border_color(window.is_window_active());
+        if self.top_border != Some(color) {
+            self.top_border = Some(color);
+            cx.notify();
+        }
+    }
+
+    /// Windows 10: the 1 px line DWM would draw along the top edge, which our title bar covers.
+    fn render_top_border(&self, window: &Window) -> Option<AnyElement> {
+        let color = self.top_border?;
+        if !crate::win::top_border_visible(true, window.is_maximized(), window.is_fullscreen()) {
+            return None;
+        }
+        Some(
+            div()
+                .id("win10-top-border")
+                .debug_selector(|| "win10-top-border".to_owned())
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                // One physical pixel at any DPI.
+                .h(px(1. / window.scale_factor()))
+                .bg(gpui::rgb(color))
+                .into_any_element(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_top_border_for_test(&mut self, color: Option<u32>) {
+        self.top_border = color;
     }
 
     /// Restores the last session. The first tab is already open on the first pane of `session.tabs[0]`.
@@ -3410,6 +3455,7 @@ impl Render for Workspace {
                         )
                     }),
             )
+            .children(self.render_top_border(window))
             .children(crate::frame_probe::marker())
     }
 }
